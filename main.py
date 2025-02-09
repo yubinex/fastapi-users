@@ -1,10 +1,13 @@
-from fastapi import Depends, FastAPI, HTTPException
-from fastapi.security import OAuth2PasswordRequestForm
-from pydantic import EmailStr, field_validator, ValidationInfo
-from sqlmodel import SQLModel, Field, Session, create_engine, select, UniqueConstraint
-from typing import Optional
+import datetime
 from contextlib import asynccontextmanager
+from typing import Optional
+
 import bcrypt
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from jose import jwt
+from pydantic import EmailStr, ValidationInfo, field_validator
+from sqlmodel import Field, Session, SQLModel, UniqueConstraint, create_engine, select
 
 engine = create_engine("sqlite:///users.db")
 
@@ -21,6 +24,11 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+oauth2_schema = OAuth2PasswordBearer(tokenUrl="login")
+
+# in a real app this should be in an .env file
+SECRET_KEY = "very-secret-key"
 
 
 class UserBase(SQLModel):
@@ -56,7 +64,7 @@ def get_session():
 
 @app.post("/register", status_code=201)
 async def create_user(user: UserCreate, session: Session = Depends(get_session)):
-    user.password = bcrypt.hashpw(user.password.encode("utf-8"), bcrypt.gensalt())
+    user.password = str(bcrypt.hashpw(user.password.encode("utf-8"), bcrypt.gensalt()))
     new_user = UserTable.model_validate(user)
     session.add(new_user)
     session.commit()
@@ -80,11 +88,33 @@ async def login(
     ):
         raise HTTPException(status_code=401, detail="incorrect username or password")
 
-    return {"user": f"logged in as {db_user.username}"}
+    jwt_data = {
+        "email": db_user.email,
+        "exp": datetime.datetime.now() + datetime.timedelta(minutes=30),
+    }
+    access_token = jwt.encode(claims=jwt_data, key=SECRET_KEY, algorithm="HS256")
+
+    return {"access_token": access_token, "token_type": "bearer"}
 
 
-@app.get("/users", status_code=200)
+# if no values from the token are needed, the dependency can be set directly in the
+# decorator - this way, there's no unused variable
+@app.get("/users", status_code=200, dependencies=[Depends(oauth2_schema)])
 async def get_users(session: Session = Depends(get_session)):
     statement = select(UserTable)
     users = session.exec(statement).all()
     return users
+
+
+# if we need values stored in the token, we add the dependency in the function
+# as a parameter to get access to the token as a variable
+@app.get("/current_user")
+async def get_current_user(
+    session: Session = Depends(get_session), token: str = Depends(oauth2_schema)
+):
+    payload = jwt.decode(token=token, key=SECRET_KEY)
+    email = payload.get("email")
+    current_user = session.exec(
+        select(UserTable).where(UserTable.email == email)
+    ).first()
+    return current_user
