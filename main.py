@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from pydantic import EmailStr, field_validator, ValidationInfo
 from sqlmodel import SQLModel, Field, Session, create_engine, select, UniqueConstraint
 from typing import Optional
@@ -47,19 +47,22 @@ class UserTable(UserBase, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
 
 
-@app.post("/register", status_code=201)
-async def create_user(user: UserCreate):
-    new_user = UserTable.model_validate(user)
+def get_session():
     with Session(engine) as session:
-        session.add(new_user)
-        session.commit()
-        session.refresh(new_user)
-        return {"id": new_user.id, "message": "user registered successfully"}
+        yield session
+
+
+@app.post("/register", status_code=201)
+async def create_user(user: UserCreate, session: Session = Depends(get_session)):
+    new_user = UserTable.model_validate(user)
+    session.add(new_user)
+    session.commit()
+    session.refresh(new_user)
+    return {"id": new_user.id, "message": "user registered successfully"}
 
 
 @app.get("/users", status_code=200)
-async def get_users():
+async def get_users(session: Session = Depends(get_session)):
     statement = select(UserTable)
-    with Session(engine) as session:
-        users = session.exec(statement).all()
-        return users
+    users = session.exec(statement).all()
+    return users
