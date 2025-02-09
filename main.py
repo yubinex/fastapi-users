@@ -108,7 +108,7 @@ async def get_users(session: Session = Depends(get_session)):
 
 # if we need values stored in the token, we add the dependency in the function
 # as a parameter to get access to the token as a variable
-@app.get("/current_user")
+@app.get("/current-user")
 async def get_current_user(
     session: Session = Depends(get_session), token: str = Depends(oauth2_schema)
 ):
