@@ -1,6 +1,6 @@
 from fastapi import FastAPI
-from pydantic import EmailStr
-from sqlmodel import SQLModel, Field, Session, create_engine, select
+from pydantic import EmailStr, field_validator, ValidationInfo
+from sqlmodel import SQLModel, Field, Session, create_engine, select, UniqueConstraint
 from typing import Optional
 from contextlib import asynccontextmanager
 
@@ -21,20 +21,34 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
-class UserModel(SQLModel):
+class UserBase(SQLModel):
     firstname: str
     lastname: str
+    username: str
     email: EmailStr
     password: str
     age: int
 
 
-class UserTable(UserModel, table=True):
+class UserCreate(UserBase):
+    repeat_password: str
+
+    @field_validator("repeat_password")
+    def passwords_must_match(cls, v: str, info: ValidationInfo) -> str:
+        if v != info.data.get("password"):
+            raise ValueError("passwords must match")
+        return v
+
+
+class UserTable(UserBase, table=True):
+    __tablename__ = "users"
+    __table_args__ = (UniqueConstraint("email"), UniqueConstraint("username"))
+
     id: Optional[int] = Field(default=None, primary_key=True)
 
 
 @app.post("/register", status_code=201)
-async def create_user(user: UserModel):
+async def create_user(user: UserCreate):
     new_user = UserTable.model_validate(user)
     with Session(engine) as session:
         session.add(new_user)
