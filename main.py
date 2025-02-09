@@ -3,6 +3,7 @@ from pydantic import EmailStr, field_validator, ValidationInfo
 from sqlmodel import SQLModel, Field, Session, create_engine, select, UniqueConstraint
 from typing import Optional
 from contextlib import asynccontextmanager
+import bcrypt
 
 engine = create_engine("sqlite:///users.db")
 
@@ -54,6 +55,7 @@ def get_session():
 
 @app.post("/register", status_code=201)
 async def create_user(user: UserCreate, session: Session = Depends(get_session)):
+    user.password = bcrypt.hashpw(user.password.encode("utf-8"), bcrypt.gensalt())
     new_user = UserTable.model_validate(user)
     session.add(new_user)
     session.commit()
