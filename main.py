@@ -1,4 +1,5 @@
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import EmailStr, field_validator, ValidationInfo
 from sqlmodel import SQLModel, Field, Session, create_engine, select, UniqueConstraint
 from typing import Optional
@@ -61,6 +62,25 @@ async def create_user(user: UserCreate, session: Session = Depends(get_session))
     session.commit()
     session.refresh(new_user)
     return {"id": new_user.id, "message": "user registered successfully"}
+
+
+@app.post("/login")
+async def login(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    session: Session = Depends(get_session),
+):
+    db_user = session.exec(
+        select(UserTable).where(UserTable.username == form_data.username)
+    ).first()
+    if not db_user:
+        raise HTTPException(status_code=401, detail="incorrect username or password")
+
+    if not bcrypt.checkpw(
+        form_data.password.encode("utf-8"), db_user.password.encode("utf-8")
+    ):
+        raise HTTPException(status_code=401, detail="incorrect username or password")
+
+    return {"user": f"logged in as {db_user.username}"}
 
 
 @app.get("/users", status_code=200)
